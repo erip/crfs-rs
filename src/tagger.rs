@@ -1,5 +1,8 @@
 use std::io;
 
+use ndarray::prelude::*;
+
+
 use crate::context::{Context, Flag, Reset};
 use crate::dataset::{self, Instance, Item};
 use crate::model::Model;
@@ -111,12 +114,13 @@ impl<'a> Tagger<'a> {
         // Compute transition scores between two labels
         let l = self.num_labels as usize;
         for i in 0..l {
-            let trans = &mut self.context.trans[l * i..];
+            let trans = &mut self.context.trans.slice_mut(s![l * i..]);
             let edge = self.model.label_ref(i as u32)?;
+
             for r in 0..edge.num_features {
                 // Transition feature from #i to #(feature.target)
                 let fid = edge.get(r as usize)?;
-                let feature = self.model.feature(fid)?;
+                let feature: crate::feature::Feature = self.model.feature(fid)?;
                 trans[feature.target as usize] = feature.weight;
             }
         }
@@ -127,7 +131,7 @@ impl<'a> Tagger<'a> {
         // Loop over the items in the sequence
         for t in 0..instance.num_items as usize {
             let item = &instance.items[t];
-            let state = &mut self.context.state[self.context.num_labels as usize * t..];
+            let state = &mut self.context.state.slice_mut(s![self.context.num_labels as usize * t..]);
             // Loop over the attributes attached to the item
             for attr in item {
                 // Access the list of state features associated with the attribute

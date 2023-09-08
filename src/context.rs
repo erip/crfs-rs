@@ -1,4 +1,5 @@
 use bitflags::bitflags;
+use ndarray::prelude::*;
 
 bitflags! {
     /// Functionality flags for contexts
@@ -42,71 +43,71 @@ pub struct Context {
     ///
     /// This is a `[T][L]` matrix whose element `[t][l]` presents total score
     /// of state features associating label #l at #t.
-    pub state: Vec<f64>,
+    pub state: Array<f64, Ix1>,
     /// Transition scores
     ///
     /// This is a `[L][L]` matrix whose element `[i][j]` represents the total
     /// score of transition features associating labels #i and #j.
-    pub trans: Vec<f64>,
+    pub trans: Array<f64, Ix1>,
     /// Alpha score matrix
     ///
     /// This is a `[T][L]` matrix whose element `[t][l]` presents the total
     /// score of paths starting at BOS and arriving at (t, l).
-    alpha_score: Vec<f64>,
+    alpha_score: Array<f64, Ix1>,
     /// Beta score matrix
     ///
     /// This is a `[T][L]` matrix whose element `[t][l]` presents the total
     /// score of paths starting at (t, l) and arriving at EOS.
-    beta_score: Vec<f64>,
+    beta_score: Array<f64, Ix1>,
     /// Scale factor vector
     ///
     /// This is a `[T]` vector whose element `[t]` presents the scaling
     /// coefficient for the alpha_score and beta_score.
-    scale_factor: Vec<f64>,
+    scale_factor: Array<f64, Ix1>,
     /// Row vector (work space)
     ///
     /// This is a `[T]` vector used internally for a work space.
-    row: Vec<f64>,
+    row: Array<f64, Ix1>,
     /// Backward edges
     ///
     /// This is a `[T][L]` matrix whose element `[t][j]` represents the label #i
     /// that yields the maximum score to arrive at (t, j).
     /// This member is available only with `CTXF_VITERBI` flag enabled.
-    backward_edge: Vec<u32>,
+    backward_edge: Array<u32, Ix1>,
     /// Exponents of state scores
     ///
     /// This is a `[T][L]` matrix whose element `[t][l]` presents the exponent
     /// of the total score of state features associating label #l at #t.
     /// This member is available only with `CTXF_MARGINALS` flag.
-    exp_state: Vec<f64>,
+    exp_state: Array<f64, Ix1>,
     /// Exponents of transition scores.
     ///
     /// This is a `[L][L]` matrix whose element `[i][j]` represents the exponent
     /// of the total score of transition features associating labels #i and #j.
     /// This member is available only with `CTXF_MARGINALS` flag.
-    exp_trans: Vec<f64>,
+    exp_trans: Array<f64, Ix1>,
     /// Model expectations of states.
     ///
     /// This is a `[T][L]` matrix whose element `[t][l]` presents the model
     /// expectation (marginal probability) of the state (t,l)
     /// This member is available only with CTXF_MARGINALS flag.
-    mexp_state: Vec<f64>,
+    mexp_state: Array<f64, Ix1>,
     /// Model expectations of transitions.
     ///
     /// This is a `[L][L]` matrix whose element `[i][j]` presents the model
     /// expectation of the transition (i--j).
     /// This member is available only with `CTXF_MARGINALS` flag.
-    mexp_trans: Vec<f64>,
+    mexp_trans: Array<f64, Ix1>,
 }
 
 impl Context {
     pub fn new(flag: Flag, l: u32, t: u32) -> Self {
         let l = l as usize;
-        let trans = vec![0.0; l * l];
+        let trans = Array::zeros(l*l);
         let (exp_trans, mexp_trans) = if flag.contains(Flag::MARGINALS) {
-            (vec![0.0; l * l + 4], vec![0.0; l * l])
+            (Array::zeros(l * l + 4), Array::zeros(l*l))
         } else {
-            (Vec::new(), Vec::new())
+            (Array::zeros(1), Array::zeros(1))
         };
         let mut ctx = Self {
             flag,
@@ -128,17 +129,17 @@ impl Context {
         if self.cap_items < t {
             let l = self.num_labels as usize;
             let t = t as usize;
-            self.alpha_score = vec![0.0; t * l];
-            self.beta_score = vec![0.0; t * l];
-            self.scale_factor = vec![0.0; t];
-            self.row = vec![0.0; l];
+            self.alpha_score = Array::zeros(t * l);
+            self.beta_score = Array::zeros(t * l);
+            self.scale_factor = Array::zeros(t);
+            self.row = Array::zeros(l);
             if self.flag.contains(Flag::VITERBI) {
-                self.backward_edge = vec![0; t * l];
+                self.backward_edge = Array::zeros(t * l);
             }
-            self.state = vec![0.0; t * l];
+            self.state = Array::zeros(t * l);
             if self.flag.contains(Flag::MARGINALS) {
-                self.exp_state = vec![0.0; t * l + 4];
-                self.mexp_state = vec![0.0; t * l];
+                self.exp_state = Array::zeros(t * l + 4);
+                self.mexp_state = Array::zeros(t * l);
             }
             self.cap_items = t as u32;
         }
@@ -148,21 +149,21 @@ impl Context {
         let t = self.num_items as usize;
         let l = self.num_labels as usize;
         if flag.contains(Reset::STATE) {
-            self.state[..t * l].fill(0.0);
+            self.state.slice_mut(s![..t * l]).fill(0.0);
         }
         if flag.contains(Reset::TRANS) {
-            self.trans[..l * l].fill(0.0);
+            self.trans.slice_mut(s![..l * l]).fill(0.0);
         }
         if self.flag.contains(Flag::MARGINALS) {
-            self.mexp_state[..t * l].fill(0.0);
-            self.mexp_trans[..l * l].fill(0.0);
+            self.mexp_state.slice_mut(s![..t * l]).fill(0.0);
+            self.mexp_trans.slice_mut(s![..l * l]).fill(0.0);
             self.log_norm = 0.0;
         }
     }
 
     pub fn exp_transition(&mut self) {
         let l = self.num_labels as usize;
-        self.exp_trans[..l * l].copy_from_slice(&self.trans);
+        self.exp_trans.slice_mut(s![..l * l]).assign(&self.trans);
         for i in 0..(l * l) {
             self.exp_trans[i] = self.exp_trans[i].exp();
         }
@@ -174,20 +175,25 @@ impl Context {
         // Compute the scores at (0, *)
         let current = &mut self.alpha_score;
         let state = &mut self.state;
-        current[..l].clone_from_slice(&state[..l]);
+        current.slice_mut(s![..l]).assign(&state.slice(s![..l]));
         // Compute the scores at (t, *)
         for t in 1..self.num_items as usize {
-            let (prev, current) = self.alpha_score.split_at_mut(l * t);
-            let prev = &prev[l * (t - 1)..];
-            let state = &self.state[l * t..];
-            let back = &mut self.backward_edge[l * t..];
+            // let (prev, current) = self.alpha_score.split_at_mut(l * t);
+            let prev = self.alpha_score.clone();
+            let prev = prev.slice(s![..l * t]);
+            let prev: ArrayBase<ndarray::ViewRepr<&f64>, Dim<[usize; 1]>> = prev.slice(s![l * (t - 1)..]);
+
+            let mut current = self.alpha_score.slice_mut(s![l * t ..]);
+
+            let state = &self.state.slice(s![l * t..]);
+            let mut back = self.backward_edge.slice_mut(s![l * t..]);
             // Compute the score of (t, j)
             for j in 0..l {
                 let mut max_score = f64::MIN;
                 let mut argmax_score = None;
                 for (i, prev_value) in prev.iter().enumerate().take(l) {
                     // Transit from (t-1, i) to (t, j)
-                    let trans = &self.trans[l * i..];
+                    let trans = &self.trans.slice(s![l * i..]);
                     score = prev_value + trans[j];
                     // Store this path if it has the maximum score
                     if max_score < score {
@@ -205,7 +211,7 @@ impl Context {
         }
         // Find the node (#T, Ei) that reaches EOS with the maximum score
         let mut max_score = f64::MIN;
-        let prev = &self.alpha_score[l * (self.num_items as usize - 1)..];
+        let prev = &self.alpha_score.slice(s![l * (self.num_items as usize - 1)..]);
         // Set a score for T-1 to be overwritten later. Just in case we don't
         // end up with something beating f64::MIN.
         let mut labels = vec![0u32; self.num_items as usize];
@@ -218,7 +224,7 @@ impl Context {
         }
         // Tag labels by tracing teh backward links
         for t in (0..(self.num_items as usize - 1)).rev() {
-            let back = &self.backward_edge[l * (t + 1)..];
+            let back = &self.backward_edge.slice(s![l * (t + 1)..]);
             labels[t] = back[labels[t + 1] as usize];
         }
         (labels, max_score)
